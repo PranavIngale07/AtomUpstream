@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { requireIdentity } from '../lib/identity';
 
 export default function Home() {
   const [loading, setLoading] = useState(false);
@@ -9,11 +10,14 @@ export default function Home() {
   const createSession = async () => {
     setLoading(true);
     try {
-      const res = await axios.post('/api/sessions/');
+      const identity = await requireIdentity('AGENT');
+      const res = await axios.post('/api/sessions/', {}, {
+        headers: { 'X-Participant-Secret': identity.secret }
+      });
       navigate(`/agent/${res.data.invite_token}`);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert('Failed to create session');
+      alert(err.message || 'Failed to create session');
     }
     setLoading(false);
   };
