@@ -121,7 +121,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, participant_
                 await manager.broadcast(session_id, {
                     "type": payload.get("type"),
                     "participant_id": participant_id,
-                    "state": payload.get("state")
+                    "state": payload.get("state"),
+                    "start_time": payload.get("start_time")
                 })
                 
     except Exception:

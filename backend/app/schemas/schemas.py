@@ -14,6 +14,7 @@ class SessionCreateResponse(BaseModel):
 
 class IdentityRequest(BaseModel):
     role: ParticipantRole
+    access_code: Optional[str] = None
 
 class ParticipantJoinRequest(BaseModel):
     display_name: str

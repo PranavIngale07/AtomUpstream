@@ -2,15 +2,20 @@ import uuid
 import secrets
 import random
 import string
-from fastapi import APIRouter, Depends, HTTPException, Header
+import os
+import aiohttp
+import aiofiles
+from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import func
 from loguru import logger
 
+from app.core.config import settings
 from app.core.database import get_db, redis_client
-from app.models.models import Session, Participant, SessionStatus, ParticipantRole, SessionEvent, Message
+from app.models.models import Session, Participant, SessionStatus, ParticipantRole, SessionEvent, Message, SessionFile
 from app.schemas.schemas import SessionCreateResponse, SessionResponse, ParticipantJoinRequest, ParticipantPrivateResponse, ParticipantPublicResponse, IdentityRequest
 from app.api.ws import manager
 
@@ -18,6 +23,11 @@ router = APIRouter()
 
 @router.post("/identity", response_model=ParticipantPrivateResponse)
 async def create_identity(req: IdentityRequest, db: AsyncSession = Depends(get_db)):
+    if req.role == ParticipantRole.AGENT:
+        if req.access_code != settings.AGENT_ACCESS_CODE:
+            logger.warning("Invalid AGENT_ACCESS_CODE provided")
+            raise HTTPException(status_code=403, detail="Invalid Agent Access Code")
+            
     logger.info(f"Creating global identity for role: {req.role}")
     participant = Participant(role=req.role, display_name=req.role.value.capitalize())
     db.add(participant)
@@ -140,12 +150,15 @@ async def get_chat_history(session_id: uuid.UUID, x_participant_secret: str = He
     )
     messages = result.scalars().all()
     return [{
-        "id": m.id,
+        "id": str(m.id),
         "text": m.content,
-        "timestamp": m.created_at,
+        "message_type": getattr(m, 'message_type', 'TEXT'),
+        "file_url": getattr(m, 'file_url', None),
+        "file_size": getattr(m, 'file_size', None),
+        "timestamp": m.created_at.isoformat() if m.created_at else None,
         "sender": m.sender.display_name,
-        "sender_role": m.sender.role,
-        "participant_id": m.sender_id
+        "sender_role": m.sender.role.value,
+        "participant_id": str(m.sender_id)
     } for m in messages]
 
 @router.get("/{session_id}/history")
@@ -199,5 +212,85 @@ async def end_session(session_id: uuid.UUID, x_participant_secret: str = Header(
     # Broadcast session end to all connected WebSockets
     await manager.broadcast(str(session_id), {"type": "session_ended"})
     
+    # Notify mediasoup server to clean up resources
+    try:
+        async with aiohttp.ClientSession() as http_session:
+            await http_session.post(f"http://127.0.0.1:4000/internal/cleanup", json={"sessionId": str(session_id)})
+    except Exception as e:
+        logger.error(f"Failed to notify mediasoup cleanup: {e}")
+    
     logger.success(f"Session {session_id} ended successfully")
     return {"status": "ended"}
+
+def format_size(num):
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if abs(num) < 1024.0:
+            return f"{num:3.1f} {unit}"
+        num /= 1024.0
+    return f"{num:.1f} TB"
+
+@router.post("/{session_id}/file/upload")
+async def upload_file(
+    session_id: uuid.UUID,
+    file: UploadFile = File(...),
+    x_participant_secret: str = Header(...),
+    db: AsyncSession = Depends(get_db)
+):
+    participant = await _validate_participant_secret(session_id, x_participant_secret, db)
+    os.makedirs(os.path.join(settings.STORAGE_DIR, "uploads"), exist_ok=True)
+    
+    file_id = secrets.token_hex(8)
+    original_ext = os.path.splitext(file.filename)[1]
+    safe_filename = f"file_{file_id}{original_ext}"
+    file_path = os.path.join(settings.STORAGE_DIR, "uploads", safe_filename)
+    
+    file_size = 0
+    async with aiofiles.open(file_path, 'wb') as out_file:
+        while content := await file.read(1024 * 1024):
+            await out_file.write(content)
+            file_size += len(content)
+            
+    formatted_size = format_size(file_size)
+    sf = SessionFile(
+        session_id=session_id,
+        uploader=participant.display_name,
+        filename=safe_filename,
+        file_size=formatted_size
+    )
+    db.add(sf)
+    
+    file_msg = Message(
+        session_id=session_id,
+        sender_id=participant.id,
+        content=f"Shared a file: {file.filename}",
+        message_type="FILE",
+        file_url=f"/api/sessions/download/uploads/{safe_filename}",
+        file_size=formatted_size
+    )
+    db.add(file_msg)
+    
+    event = SessionEvent(session_id=session_id, event_type="file_uploaded", payload=f'{{"filename": "{safe_filename}", "uploader": "{participant.display_name}"}}')
+    db.add(event)
+    
+    await db.commit()
+    
+    # Broadcast file message
+    await manager.broadcast(str(session_id), {
+        "type": "chat_message",
+        "text": file_msg.content,
+        "message_type": "FILE",
+        "file_url": file_msg.file_url,
+        "file_size": file_msg.file_size,
+        "participant_id": str(participant.id),
+        "sender": participant.display_name,
+        "id": str(file_msg.id)
+    })
+    
+    return {"status": "success", "filename": safe_filename}
+
+@router.get("/download/uploads/{filename}")
+async def download_upload(filename: str):
+    file_path = os.path.join(settings.STORAGE_DIR, "uploads", filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(path=file_path, filename=filename)

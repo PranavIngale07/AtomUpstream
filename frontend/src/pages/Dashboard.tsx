@@ -43,6 +43,14 @@ interface Message {
   created_at: string;
 }
 
+
+interface UploadedFile {
+  filename: string;
+  uploader: string;
+  file_size: string;
+  uploaded_at: string;
+}
+
 interface SessionDetails {
   id: string;
   invite_code: string;
@@ -54,36 +62,57 @@ interface SessionDetails {
   participants: Participant[];
   events: Event[];
   messages: Message[];
+  files: UploadedFile[];
 }
 
 export default function Dashboard() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [dashboardAuth, setDashboardAuth] = useState<string | null>(sessionStorage.getItem('dashboard_auth'));
 
   const [overview, setOverview] = useState<Overview | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [sessionDetails, setSessionDetails] = useState<SessionDetails | null>(null);
 
+  useEffect(() => {
+    if (!dashboardAuth) {
+      const code = prompt("Enter Dashboard Access Code (e.g. ADMIN_DASHBOARD_2026):");
+      if (code) {
+        sessionStorage.setItem('dashboard_auth', code);
+        setDashboardAuth(code);
+      } else {
+        window.location.href = '/';
+      }
+    }
+  }, [dashboardAuth]);
+
   const fetchOverview = async () => {
+    if (!dashboardAuth) return;
     try {
-      const res = await axios.get('/api/dashboard/overview');
+      const res = await axios.get('/api/dashboard/overview', { headers: { 'X-Dashboard-Secret': dashboardAuth } });
       setOverview(res.data);
-    } catch (e) {
+    } catch (e: any) {
+      if (e.response?.status === 403) {
+         sessionStorage.removeItem('dashboard_auth');
+         setDashboardAuth(null);
+      }
       console.error(e);
     }
   };
 
   const fetchSessions = async () => {
+    if (!dashboardAuth) return;
     try {
-      const res = await axios.get('/api/dashboard/sessions');
+      const res = await axios.get('/api/dashboard/sessions', { headers: { 'X-Dashboard-Secret': dashboardAuth } });
       setSessions(res.data);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
     }
   };
 
   const fetchSessionDetails = async (id: string) => {
+    if (!dashboardAuth) return;
     try {
-      const res = await axios.get(`/api/dashboard/sessions/${id}`);
+      const res = await axios.get(`/api/dashboard/sessions/${id}`, { headers: { 'X-Dashboard-Secret': dashboardAuth } });
       setSessionDetails(res.data);
       setSelectedSessionId(id);
       setTimeout(() => {
@@ -117,6 +146,7 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (!dashboardAuth) return;
     fetchOverview();
     fetchSessions();
     const interval = setInterval(() => {
@@ -124,7 +154,7 @@ export default function Dashboard() {
       fetchSessions();
     }, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [dashboardAuth]);
 
   const liveSessions = sessions.filter(s => s.status === 'ACTIVE' || s.status === 'CREATED');
 
