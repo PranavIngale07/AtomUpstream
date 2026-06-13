@@ -5,6 +5,7 @@ import Home from './pages/Home';
 import AgentRoom from './pages/AgentRoom';
 import JoinSession from './pages/JoinSession';
 import Room from './pages/Room';
+import Dashboard from './pages/Dashboard';
 import './index.css';
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
       <div className="app-container">
         <Routes>
           <Route path="/" element={<Landing />} />
+          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/agent-home" element={<Home />} />
           <Route path="/customer-home" element={<CustomerHome />} />
           <Route path="/agent/:inviteToken" element={<AgentRoom />} />

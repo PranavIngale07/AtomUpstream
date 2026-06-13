@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Headset, Users } from 'lucide-react';
+import { Headset, Users, LayoutDashboard } from 'lucide-react';
 import { requireIdentity } from '../lib/identity';
 import { useState } from 'react';
 
@@ -47,6 +47,17 @@ export default function Landing() {
         >
           <Users size={20} />
           Continue as Customer
+        </button>
+      </div>
+      
+      <div style={{ marginTop: '3rem', paddingTop: '2rem', borderTop: '1px solid var(--border)' }}>
+        <button 
+          className="btn" 
+          style={{ backgroundColor: 'transparent', border: '1px solid var(--primary)', color: 'var(--primary)', margin: '0 auto' }} 
+          onClick={() => navigate('/dashboard')}
+        >
+          <LayoutDashboard size={20} />
+          Admin Dashboard
         </button>
       </div>
     </div>
