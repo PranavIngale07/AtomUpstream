@@ -22,6 +22,24 @@ const { startMediasoup, getOrCreateRouter } = require('./mediasoup');
 
 const app = express();
 app.use(cors());
+app.use(express.json());
+
+app.post('/internal/cleanup', async (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) return res.status(400).send('Missing sessionId');
+  
+  if (rooms[sessionId]) {
+    for (const peerId in rooms[sessionId].peers) {
+      const peer = rooms[sessionId].peers[peerId];
+      if (peer.send) peer.send.close();
+      if (peer.recv) peer.recv.close();
+    }
+    delete rooms[sessionId];
+    console.log(`Cleaned up mediasoup resources for session ${sessionId}`);
+  }
+  
+  res.send({ success: true });
+});
 
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });

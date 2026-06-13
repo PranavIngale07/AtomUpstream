@@ -9,17 +9,24 @@ export default function Landing() {
   const [error, setError] = useState('');
 
   const selectRole = async (role: 'AGENT' | 'CUSTOMER') => {
+    let accessCode = undefined;
+    if (role === 'AGENT') {
+      const code = prompt("Enter Agent Access Code (e.g. SUPPORT_AGENT_2026):");
+      if (!code) return; // User cancelled
+      accessCode = code;
+    }
+    
     setLoading(true);
     setError('');
     try {
-      await requireIdentity(role);
+      await requireIdentity(role, accessCode);
       if (role === 'AGENT') {
         navigate('/agent-home');
       } else {
         navigate('/customer-home');
       }
     } catch (e: any) {
-      setError(e.message || 'Failed to initialize identity');
+      setError(e.response?.data?.detail || e.message || 'Failed to initialize identity');
     } finally {
       setLoading(false);
     }

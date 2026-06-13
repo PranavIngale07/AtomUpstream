@@ -1,18 +1,24 @@
 import uuid
 from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import func
 
+from app.core.config import settings
 from app.core.database import get_db, redis_client
 from app.models.models import Session, Participant, Message, SessionEvent, SessionStatus, ParticipantRole
 
 router = APIRouter()
 
+async def verify_dashboard_secret(x_dashboard_secret: str = Header(None)):
+    if x_dashboard_secret != settings.DASHBOARD_ACCESS_CODE:
+        raise HTTPException(status_code=403, detail="Invalid Dashboard Access Code")
+    return x_dashboard_secret
+
 @router.get("/overview")
-async def get_dashboard_overview(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def get_dashboard_overview(db: AsyncSession = Depends(get_db), auth: str = Depends(verify_dashboard_secret)) -> Dict[str, Any]:
     # Total sessions
     total_result = await db.execute(select(func.count(Session.id)))
     total_sessions = total_result.scalar_one()
@@ -40,7 +46,7 @@ async def get_dashboard_overview(db: AsyncSession = Depends(get_db)) -> Dict[str
     }
 
 @router.get("/sessions")
-async def get_dashboard_sessions(db: AsyncSession = Depends(get_db)) -> List[Dict[str, Any]]:
+async def get_dashboard_sessions(db: AsyncSession = Depends(get_db), auth: str = Depends(verify_dashboard_secret)) -> List[Dict[str, Any]]:
     result = await db.execute(
         select(Session)
         .options(selectinload(Session.participants))
@@ -83,12 +89,13 @@ async def get_dashboard_sessions(db: AsyncSession = Depends(get_db)) -> List[Dic
     return output
 
 @router.get("/sessions/{session_id}")
-async def get_dashboard_session_details(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def get_dashboard_session_details(session_id: uuid.UUID, db: AsyncSession = Depends(get_db), auth: str = Depends(verify_dashboard_secret)) -> Dict[str, Any]:
     result = await db.execute(
         select(Session)
         .options(
             selectinload(Session.participants),
-            selectinload(Session.messages).selectinload(Message.sender)
+            selectinload(Session.messages).selectinload(Message.sender),
+            selectinload(Session.files)
         )
         .where(Session.id == session_id)
     )
@@ -137,5 +144,13 @@ async def get_dashboard_session_details(session_id: uuid.UUID, db: AsyncSession 
                 "content": m.content,
                 "created_at": m.created_at.isoformat()
             } for m in sorted(session.messages, key=lambda msg: msg.created_at)
+        ],
+        "files": [
+            {
+                "filename": f.filename,
+                "uploader": f.uploader,
+                "file_size": f.file_size,
+                "uploaded_at": f.uploaded_at.isoformat()
+            } for f in session.files
         ]
     }

@@ -26,6 +26,7 @@ class Session(Base):
 
     participants = relationship("Participant", back_populates="session")
     messages = relationship("Message", back_populates="session")
+    files = relationship("SessionFile", back_populates="session")
 
 class Participant(Base):
     __tablename__ = "participants"
@@ -45,6 +46,9 @@ class Message(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"))
     sender_id = Column(UUID(as_uuid=True), ForeignKey("participants.id"))
     content = Column(Text)
+    message_type = Column(String, default="TEXT") # TEXT or FILE
+    file_url = Column(String, nullable=True)
+    file_size = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     session = relationship("Session", back_populates="messages")
@@ -57,3 +61,14 @@ class SessionEvent(Base):
     event_type = Column(String)
     payload = Column(Text) # Stored as JSON string
     created_at = Column(DateTime, default=datetime.utcnow)
+
+class SessionFile(Base):
+    __tablename__ = "session_files"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"))
+    uploader = Column(String)
+    filename = Column(String)
+    file_size = Column(String)
+    uploaded_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("Session", back_populates="files")
